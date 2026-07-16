@@ -58,7 +58,16 @@
 body { transition: background-color 280ms cubic-bezier(.22, 1, .36, 1), color 220ms ease; }
 button, a, input, textarea, select, .apple-card, .upload-surface, .question-row { -webkit-tap-highlight-color: transparent; }
 :where(button, a, input, textarea, select):focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 28%, transparent); outline-offset: 2px; }
-.app-logo-mark, .hero-accent-text { background: linear-gradient(135deg, var(--accent), var(--accent-highlight)) !important; }
+.app-logo-mark {
+  background-image: linear-gradient(135deg, var(--accent), var(--accent-highlight)) !important;
+}
+.hero-accent-text {
+  background-image: linear-gradient(135deg, var(--accent), var(--accent-highlight)) !important;
+  background-clip: text !important;
+  -webkit-background-clip: text !important;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
 .app-header { will-change: height; transition: height 300ms cubic-bezier(.22, 1, .36, 1), border-color 220ms ease, background-color 220ms ease; }
 .header-icon-button { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--text-secondary); background: var(--bg-surface-secondary); transition: transform 180ms cubic-bezier(.22, 1, .36, 1), color 180ms ease, background-color 180ms ease; }
 .header-icon-button:hover { color: var(--accent); transform: translateY(-1px); }
@@ -94,12 +103,3 @@ button, a, input, textarea, select, .apple-card, .upload-surface, .question-row 
 @keyframes appearance-in { from { opacity: 0; transform: translate3d(0, -7px, 0) scale(.975); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
 @media (max-width: 640px) { .appearance-panel { position: fixed; top: 68px; right: 14px; } .appearance-swatch small { display: none; } .header-actions { gap: 5px; } }
 @media (prefers-reduced-motion: reduce), (update: slow) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
-/* Keep gradient glyphs inside their paint box on every font renderer. */
-.app-hero h1 { overflow: visible; }
-.app-hero .hero-accent-text {
-  line-height: 1.1 !important;
-  padding-block: 0.055em 0.12em;
-  margin-top: 0.015em !important;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
