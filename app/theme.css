@@ -94,3 +94,12 @@ button, a, input, textarea, select, .apple-card, .upload-surface, .question-row 
 @keyframes appearance-in { from { opacity: 0; transform: translate3d(0, -7px, 0) scale(.975); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
 @media (max-width: 640px) { .appearance-panel { position: fixed; top: 68px; right: 14px; } .appearance-swatch small { display: none; } .header-actions { gap: 5px; } }
 @media (prefers-reduced-motion: reduce), (update: slow) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+/* Keep gradient glyphs inside their paint box on every font renderer. */
+.app-hero h1 { overflow: visible; }
+.app-hero .hero-accent-text {
+  line-height: 1.1 !important;
+  padding-block: 0.055em 0.12em;
+  margin-top: 0.015em !important;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
