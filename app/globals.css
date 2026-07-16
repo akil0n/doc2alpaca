@@ -1,0 +1,261 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Apple Design Token System ===== */
+:root {
+  /* 亮色模式 */
+  --bg-canvas: #FBFBFD;
+  --bg-surface: #FFFFFF;
+  --bg-surface-secondary: #F5F5F7;
+  --bg-surface-tertiary: #E8E8ED;
+  --border-default: #D2D2D7;
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --text-primary: #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-tertiary: #86868B;
+  --accent: #0071E3;
+  --accent-hover: #0077ED;
+  --accent-soft: rgba(0, 113, 227, 0.08);
+  --success: #34C759;
+  --success-soft: rgba(52, 199, 89, 0.1);
+  --warning: #FF9500;
+  --warning-soft: rgba(255, 149, 0, 0.1);
+  --error: #FF3B30;
+  --error-soft: rgba(255, 59, 48, 0.08);
+  --shadow-color: 0, 0, 0;
+  --header-blur-bg: rgba(251, 251, 253, 0.72);
+  --header-border: rgba(0, 0, 0, 0.08);
+  --grid-color: rgba(0, 0, 0, 0.02);
+}
+
+.dark {
+  --bg-canvas: #000000;
+  --bg-surface: #1C1C1E;
+  --bg-surface-secondary: #2C2C2E;
+  --bg-surface-tertiary: #3A3A3C;
+  --border-default: #38383A;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --text-primary: #F5F5F7;
+  --text-secondary: #A1A1A6;
+  --text-tertiary: #6E6E73;
+  --accent: #0A84FF;
+  --accent-hover: #409CFF;
+  --accent-soft: rgba(10, 132, 255, 0.12);
+  --success: #30D158;
+  --success-soft: rgba(48, 209, 88, 0.12);
+  --warning: #FF9F0A;
+  --warning-soft: rgba(255, 159, 10, 0.12);
+  --error: #FF453A;
+  --error-soft: rgba(255, 69, 58, 0.1);
+  --shadow-color: 0, 0, 0;
+  --header-blur-bg: rgba(0, 0, 0, 0.72);
+  --header-border: rgba(255, 255, 255, 0.08);
+  --grid-color: rgba(255, 255, 255, 0.02);
+}
+
+/* ===== Base ===== */
+* {
+  border-color: var(--border-default);
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  letter-spacing: -0.01em;
+  transition: background-color 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== Apple Typography ===== */
+.text-display {
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.text-headline {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.text-body {
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+}
+
+/* ===== 背景网格纹理 ===== */
+.bg-grid {
+  background-image: linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* ===== 毛玻璃 ===== */
+.glass {
+  background: var(--header-blur-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* ===== Apple Card ===== */
+.apple-card {
+  background: var(--bg-surface);
+  border-radius: 18px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 1px 3px rgba(var(--shadow-color), 0.04),
+    0 1px 2px rgba(var(--shadow-color), 0.03);
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.3s ease;
+}
+
+.apple-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(var(--shadow-color), 0.08),
+    0 4px 12px rgba(var(--shadow-color), 0.04);
+  border-color: var(--accent);
+}
+
+/* ===== Apple Button ===== */
+.btn-apple {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  border-radius: 980px;
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.btn-apple:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.02);
+}
+
+.btn-apple:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-apple:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 980px;
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-surface-secondary);
+  color: var(--text-primary);
+}
+
+/* ===== 进度条 ===== */
+.progress-track {
+  background: var(--bg-surface-tertiary);
+  border-radius: 980px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  border-radius: 980px;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: shimmer 2s linear infinite;
+}
+
+/* ===== Shimmer 骨架屏 ===== */
+.shimmer-bg {
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface-secondary) 0%,
+    var(--bg-surface-tertiary) 50%,
+    var(--bg-surface-secondary) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+}
+
+/* ===== 入场动画延迟工具类 ===== */
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+.delay-600 { animation-delay: 600ms; }
+
+/* 初始隐藏，等待动画触发 */
+.animate-fade-in,
+.animate-fade-in-up,
+.animate-fade-in-down,
+.animate-scale-in,
+.animate-slide-in-right {
+  opacity: 0;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface-tertiary);
+  border-radius: 980px;
+  border: 2px solid var(--bg-canvas);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* ===== Selection ===== */
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ===== Reduced Motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
