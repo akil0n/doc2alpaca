@@ -8,7 +8,7 @@
     "build": "next build && node scripts/postbuild.js",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --no-warnings --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "electron:setup": "node scripts/install-electron.js",
     "electron:dev": "concurrently -k -n next,electron \"next dev -p 3457\" \"wait-on -t 120000 -i 3000 http://localhost:3457 && cross-env ELECTRON_DEV=1 electron .\"",
     "electron:build:win": "next build && node scripts/postbuild.js && electron-builder --win --x64",
@@ -45,6 +45,7 @@
     "postcss": "8.5.10",
     "prisma": "^6.19.3",
     "tailwindcss": "^3.4.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.3.0",
     "wait-on": "^7.2.0"
   },
