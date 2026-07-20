@@ -1,58 +1,74 @@
-// ============================================================
-// GET /api/progress — 查询深度提取会话进度
-//
-// 用于前端页面加载时检测未完成任务，支持恢复。
-// ============================================================
-
+import { rm } from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, getPendingSessions, loadProgress } from "@/lib/sessionManager";
+import {
+  getPendingSessions,
+  getSession,
+  getSessionDir,
+  loadProgress,
+  sessionBelongsTo,
+} from "@/lib/sessionManager";
+import { isSameOriginRequest } from "@/lib/requestSecurity";
+import { currentUserId } from "@/lib/authGuard";
+import type { SessionMeta } from "@/types";
 
-/**
- * GET /api/progress?sessionId=xxx&items=true
- *
- * 查询指定会话的状态和进度。
- * items=true 时返回所有轮次的完整数据条目。
- */
+export const runtime = "nodejs";
+
+function publicMeta(meta: SessionMeta) {
+  return {
+    sessionId: meta.sessionId,
+    status: meta.status,
+    createdAt: meta.createdAt,
+    updatedAt: meta.updatedAt,
+    sourceFile: {
+      fileName: meta.sourceFile.fileName,
+      fileType: meta.sourceFile.fileType,
+    },
+    config: meta.config,
+    stats: meta.stats,
+  };
+}
+
 export async function GET(request: NextRequest) {
-  const sessionId = request.nextUrl.searchParams.get("sessionId");
+  const ownerToken = await currentUserId();
+  if (!ownerToken) {
+    return NextResponse.json({ found: false }, { status: 401 });
+  }
 
-  // ---- 按 sessionId 查询 ----
+  const sessionId = request.nextUrl.searchParams.get("sessionId");
   if (sessionId) {
-    const meta = await getSession(sessionId);
-    if (!meta) {
-      return NextResponse.json(
-        { found: false, message: "会话不存在" },
-        { status: 404 }
-      );
+    let meta;
+    try {
+      meta = await getSession(sessionId);
+    } catch {
+      meta = null;
+    }
+    if (!meta || !sessionBelongsTo(meta, ownerToken)) {
+      return NextResponse.json({ found: false }, { status: 404 });
     }
 
     const [rounds, truncated] = await loadProgress(sessionId);
-    const totalItems = rounds.reduce((sum, r) => sum + r.items.length, 0);
-
+    const totalItems = rounds.reduce((sum, round) => sum + round.items.length, 0);
     const includeItems = request.nextUrl.searchParams.get("items") === "true";
 
     return NextResponse.json({
       found: true,
-      meta,
+      meta: publicMeta(meta),
       progress: {
         totalRounds: rounds.length,
         totalItems,
-        rounds: rounds.map((r) => ({
-          round: r.round,
-          validCount: r.validCount,
-          finishReason: r.finishReason,
+        rounds: rounds.map((round) => ({
+          round: round.round,
+          validCount: round.validCount,
+          finishReason: round.finishReason,
         })),
         truncated,
       },
-      ...(includeItems ? { items: rounds.flatMap((r) => r.items) } : {}),
+      ...(includeItems ? { items: rounds.flatMap((round) => round.items) } : {}),
     });
   }
 
-  // ---- 列出所有未完成会话 ----
-  const pending = await getPendingSessions();
-
-  // 只返回基本信息，不包含完整的 items 数据
-  const summary = pending.map((meta) => ({
+  const pending = await getPendingSessions(ownerToken);
+  const sessions = pending.map((meta) => ({
     sessionId: meta.sessionId,
     status: meta.status,
     createdAt: meta.createdAt,
@@ -60,44 +76,29 @@ export async function GET(request: NextRequest) {
     fileName: meta.sourceFile.fileName,
     stats: meta.stats,
   }));
-
-  return NextResponse.json({
-    found: summary.length > 0,
-    sessions: summary,
-  });
+  return NextResponse.json({ found: sessions.length > 0, sessions });
 }
 
-/**
- * DELETE /api/progress?sessionId=xxx
- *
- * 删除指定会话的进度文件（中断/取消任务时调用）。
- */
 export async function DELETE(request: NextRequest) {
+  if (!isSameOriginRequest(request)) {
+    return NextResponse.json({ error: "拒绝跨站请求" }, { status: 403 });
+  }
+  const ownerToken = await currentUserId();
   const sessionId = request.nextUrl.searchParams.get("sessionId");
-  if (!sessionId) {
-    return NextResponse.json({ error: "缺少 sessionId 参数" }, { status: 400 });
+  if (!ownerToken || !sessionId) {
+    return NextResponse.json({ error: "会话无效" }, { status: 400 });
   }
 
-  const { unlink } = await import("fs/promises");
-  const { join } = await import("path");
-  const { cwd } = await import("process");
-
-  const dir = join(cwd(), ".tmp", "sessions", sessionId);
-
-  let deleted = 0;
-  for (const name of ["meta.json", "progress.jsonl"]) {
-    try {
-      await unlink(join(dir, name));
-      deleted++;
-    } catch {
-      // 文件可能不存在
-    }
-  }
+  let meta;
   try {
-    await unlink(dir);
+    meta = await getSession(sessionId);
   } catch {
-    // 目录可能非空
+    meta = null;
+  }
+  if (!meta || !sessionBelongsTo(meta, ownerToken)) {
+    return NextResponse.json({ deleted: false }, { status: 404 });
   }
 
-  return NextResponse.json({ deleted: deleted > 0 });
+  await rm(getSessionDir(sessionId), { recursive: true, force: true });
+  return NextResponse.json({ deleted: true });
 }

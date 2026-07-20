@@ -35,7 +35,8 @@ export async function runDeepAnalysis(
   extracted: ExtractedText,
   session: SessionMeta,
   llmConfig?: LLMCallConfig,
-  onRound?: RoundCallback
+  onRound?: RoundCallback,
+  signal?: AbortSignal
 ): Promise<{ totalItems: number; totalRounds: number; items: AlpacaItem[] }> {
   const config = session.config;
   const allItems: AlpacaItem[] = [];
@@ -54,7 +55,7 @@ export async function runDeepAnalysis(
     const prompt = buildDeepPrompt(extracted, allItems, round);
 
     // 调用 LLM
-    const llmResponse = await callLLM(prompt, llmConfig);
+    const llmResponse = await callLLM(prompt, llmConfig, signal);
     const finishReason = llmResponse.finishReason;
 
     // 解析结果

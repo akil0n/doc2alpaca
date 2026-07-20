@@ -1,68 +1,134 @@
-# Doc2Alpaca Web
+# Doc2Alpaca
 
-一个面向浏览器的文档问答数据集生成与审核工具。支持 PDF、DOCX、PPTX、TXT、Markdown 和 HTML，输出 Alpaca 或 ShareGPT JSON。
+**文档转 LLaMA-Factory 数据集工具**
 
-## 特性
+上传 PDF、Word、TXT、Markdown、HTML 等格式文档，通过 LLM 智能解析生成 **Alpaca 格式（instruction/input/output）JSON 数据集**，直接用于 LLaMA-Factory 微调训练。
 
-- 单文件与批量转换
-- 分块提取、全局去重、来源证据与质量评分
-- 问答检索、筛选、逐条审核和安全导出
-- 深色模式、六套主题色及自定义全局主题色
-- 轻量 CSS 动效，并自动适配“减少动态效果”和低刷新设备
+---
 
-## 本地运行
+## 快速开始
 
-需要 Node.js 18.17 或更高版本。
+### 1. 安装依赖
 
 ```bash
 npm install
-cp .env.example .env.local
+```
+
+### 2. 配置数据库、登录和加密密钥
+
+复制 `.env.example` 并配置 PostgreSQL、`AUTH_SECRET`、`DATA_ENCRYPTION_KEY` 以及所需登录服务商，然后执行：
+
+```bash
+npx prisma migrate deploy
+```
+
+登录支持手机号、微信开放平台网站应用、QQ 互联和 GitHub；未配置凭据的方式会自动隐藏。完整配置与回调地址见 [登录与安全部署](docs/DEPLOYMENT_SECURITY.md)。
+
+公开部署默认只允许内置白名单中的 HTTPS LLM 域名。用户自己的 Key 只以服务端密文保存，浏览器不会取回完整 Key。
+
+### 3. 启动
+
+```bash
 npm run dev
 ```
 
-Windows PowerShell 可使用：
+浏览器打开 http://localhost:3000
 
-```powershell
-Copy-Item .env.example .env.local
-npm.cmd install
-npm.cmd run dev
+### 4. 使用
+
+1. 拖拽或点击上传文档
+2. 点击"开始解析"
+3. 等待 LLM 解析完成
+4. 预览 Alpaca 数据集
+5. 下载 JSON 文件
+
+---
+
+## 支持的文档格式
+
+| 格式 | 文件扩展名 | 解析引擎 |
+|------|-----------|---------|
+| PDF | `.pdf` | pdf-parse |
+| Word | `.docx` | mammoth |
+| 纯文本 | `.txt` | 原生读取 |
+| Markdown | `.md`, `.markdown` | marked |
+| HTML | `.html`, `.htm` | HTML 清洗 |
+
+最大文件大小：**10MB**。上传文件使用当前登录用户绑定的一次性 `uploadId`，提取到内存后立即删除；后台清理器每 10 分钟删除超过 30 分钟的孤儿文件，新上传也会触发清理；无常驻进程的平台仍需配置平台 Cron。
+
+---
+
+## 输出格式
+
+标准 **Alpaca 格式**，每个条目包含三个字段：
+
+```json
+[
+  {
+    "instruction": "总结文档的主要内容",
+    "input": "（文档内容摘要段落）",
+    "output": "文档主要讨论了..."
+  }
+]
 ```
 
-打开 <http://localhost:3000>。
-
-## 环境变量
-
-```env
-LLM_API_KEY=your-api-key-here
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o
-```
-
-不要提交 `.env.local`、真实 API Key、上传文档或生成的数据集。项目已通过 `.gitignore` 默认排除这些内容。
-
-## 验证与生产运行
+可直接用于 LLaMA-Factory：
 
 ```bash
-npm run typecheck
-npm test
-npm run build
-npm start
+llamafactory-cli train \
+  --dataset alpaca_dataset.json \
+  --dataset_format alpaca
 ```
 
-## 部署
+---
 
-可直接导入 Vercel，或在支持 Node.js 的服务器中执行 `npm run build && npm start`。部署时请在平台的环境变量设置中配置 LLM 凭据。
+## 技术栈
 
-## 目录
+- **框架**: Next.js 14 (App Router)
+- **语言**: TypeScript
+- **样式**: Tailwind CSS
+- **LLM 调用**: OpenAI 兼容 API
+- **文档解析**: pdf-parse, mammoth, marked
 
-```text
-app/          页面、样式和 API 路由
-components/   界面组件
-lib/          文档处理、问答生成、检索与导出逻辑
-public/       静态资源
-tests/        核心流程测试
-types/        共享类型
-workers/      浏览器检索 Worker
-```
+## 架构说明
 
-此上传版仅包含 Web 应用，不包含 Electron、安装包、构建产物或本地环境文件。
+本项目采用**模块化单体**架构，核心模块：
+
+| 模块 | 职责 |
+|------|------|
+| `lib/textExtractor` | 文档文本提取 |
+| `lib/promptBuilder` | Alpaca 格式 Prompt 构建 |
+| `lib/aiClient` | LLM API 调用 |
+| `lib/resultParser` | 结果解析与字段校验 |
+| `lib/orchestrator` | 业务流程编排 |
+| `lib/exportService` | JSON 下载与剪贴板导出 |
+| `lib/configService` | 环境变量配置读取 |
+
+架构原则：**责任完整，不是技术复杂** — 覆盖完整应用责任，但不引入微服务、多租户、企业权限等复杂设计。
+
+---
+
+## 后续扩展
+
+已预留接口，v1 不做：
+
+- **批量处理** — 一次上传多个文档
+- **ShareGPT 格式** — 多轮对话数据集导出
+- **自定义 Instruction 模板** — 用户自定义 prompt
+- **历史记录** — 保存转换记录
+
+---
+
+## License
+
+MIT
+
+## 安全与隐私
+
+- 所有上传、分析、进度、配置和历史接口均校验登录用户与资源归属。
+- 原始文档只用于当前任务，提取完成、失败或连接中断后都会删除；历史由服务端创建，仅加密保存 Alpaca 三字段生成结果，不保存原文证据或原文件名。
+- 用户 API Key、配置、手机号和生成结果使用服务端认证加密；OAuth 令牌不持久化，第三方账户 ID 哈希化保存。
+- 上传内容会发送给所选 LLM 服务商；第三方留存规则以其协议为准。
+- 多实例或 Serverless 生产环境仍需把本地 `.tmp` 替换为带生命周期策略和恶意文件扫描的共享对象存储。
+
+部署清单、回调地址和密钥管理要求见 [docs/DEPLOYMENT_SECURITY.md](docs/DEPLOYMENT_SECURITY.md)。

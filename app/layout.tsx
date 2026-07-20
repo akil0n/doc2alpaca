@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import "./workbench.css";
 import "./refinement-v0.css";
@@ -9,18 +10,26 @@ export const metadata: Metadata = {
   description: "将你的文档一键转换为高质量的 Alpaca 格式训练数据集",
 };
 
-export default function RootLayout({
+export const dynamic = "force-dynamic";
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `
               try {
+                if (navigator.userAgent.includes('Electron')) {
+                  document.documentElement.classList.add('electron');
+                }
                 var stored = localStorage.getItem('doc2alpaca-dark-mode');
                 if (stored === 'true' || (stored === null && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
                   document.documentElement.classList.add('dark');
