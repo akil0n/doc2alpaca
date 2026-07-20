@@ -251,6 +251,10 @@ body {
   .header-actions a { display: none; }
 }
 
+.electron .upload-surface,
+.electron .review-workbench { box-shadow: 0 14px 38px rgba(var(--shadow-color), .07); }
+.electron .app-header { backdrop-filter: none; -webkit-backdrop-filter: none; }
+
 @media (prefers-reduced-motion: reduce), (update: slow) {
   .upload-surface:hover,
   .question-row:hover { transform: none; }

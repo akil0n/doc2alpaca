@@ -81,7 +81,7 @@ export function FileUploadPanel({ onFileSelect, onFilesSelect, batchMode = false
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.markdown,.html,.htm"
+          accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.html,.htm"
           multiple={batchMode}
           onChange={handleFileChange}
           className="hidden"
@@ -156,6 +156,13 @@ export function FileUploadPanel({ onFileSelect, onFilesSelect, batchMode = false
             ))}
           </div>
 
+          <p
+            className="max-w-2xl text-[12px] leading-relaxed"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            文档内容会发送给你选择的 LLM 服务商进行处理；第三方是否留存内容取决于其数据协议。
+          </p>
+
           {/* 批量模式提示 */}
           {batchMode && (
             <div
@@ -180,7 +187,7 @@ export function FileUploadPanel({ onFileSelect, onFilesSelect, batchMode = false
 
 /** 允许的文件扩展名 */
 const ALLOWED_TYPES = [
-  ".pdf", ".docx", ".pptx", ".ppt",
+  ".pdf", ".docx", ".pptx",
   ".txt", ".md", ".markdown",
   ".html", ".htm",
 ];
