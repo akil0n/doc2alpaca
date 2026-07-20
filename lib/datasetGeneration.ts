@@ -65,7 +65,8 @@ export async function runFullExtraction(
   onChunk?: (event: GenerationChunkEvent) => void,
   onDedup?: (event: { before: number; after: number; removed: number }) => void,
   resumeState?: GenerationResumeState | null,
-  onCheckpoint?: (state: GenerationResumeState) => void | Promise<void>
+  onCheckpoint?: (state: GenerationResumeState) => void | Promise<void>,
+  signal?: AbortSignal
 ): Promise<FullExtractionResult> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const chunks = chunkStructuredDocument(extracted.text, {
@@ -110,7 +111,7 @@ export async function runFullExtraction(
           });
         }
 
-        const response = await callLLM(buildChunkRequest(extracted, chunk, cfg.temperature), llmConfig);
+        const response = await callLLM(buildChunkRequest(extracted, chunk, cfg.temperature), llmConfig, signal);
         const parsed = parseAlpacaResponse(response.rawContent);
         parseErrors.push(...parsed.parseErrors.map((message) => `${chunk.id}: ${message}`));
 
@@ -122,7 +123,8 @@ export async function runFullExtraction(
         if (response.finishReason === "length" && generated.length > 0) {
           const continuation = await callLLM(
             buildContinuationRequest(extracted, chunk, generated, cfg.temperature),
-            llmConfig
+            llmConfig,
+            signal
           );
           const continuationParsed = parseAlpacaResponse(continuation.rawContent);
           parseErrors.push(
@@ -164,6 +166,7 @@ export async function runFullExtraction(
         break;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
+        if (signal?.aborted) throw error;
         if (attempt < cfg.maxAttemptsPerChunk) await delay(350 * 2 ** (attempt - 1));
       }
     }

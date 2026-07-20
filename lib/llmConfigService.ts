@@ -1,8 +1,8 @@
 // ============================================================
 // LLMConfigService — LLM 厂商配置服务
 //
-// 职责：管理 LLM 厂商选择、模型列表、API Key 持久化，
-//       配置保存在 LocalStorage 中
+// 职责：管理 LLM 厂商选择、模型列表、API Key 页面内存保存，
+//       配置仅保存在当前页面内存中
 // 不负责：调用 LLM、构建 Prompt
 // ============================================================
 
@@ -32,7 +32,17 @@ export interface LLMUserConfig {
   baseUrl: string;
 }
 
-const STORAGE_KEY = "doc2alpaca_llm_config";
+let memoryConfig: LLMUserConfig | null = null;
+
+/** Remove API keys persisted by versions released before the memory-only policy. */
+export function clearLegacyPersistedConfig(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem("doc2alpaca_llm_config");
+  } catch {
+    // Storage may be disabled by browser policy.
+  }
+}
 
 // ===================== 厂商定义 =====================
 
@@ -160,43 +170,27 @@ export function getVendorById(id: string): VendorDef | undefined {
  * 获取保存的用户配置
  */
 export function getSavedConfig(): LLMUserConfig | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return memoryConfig ? { ...memoryConfig } : null;
 }
 
 /**
- * 保存用户配置到 LocalStorage
+ * 保存用户配置到 页面内存
  */
 export function saveConfig(config: LLMUserConfig): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  } catch {
-    // 静默处理
-  }
+  memoryConfig = { ...config };
 }
 
 /**
  * 清空用户配置
  */
 export function clearConfig(): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // 静默处理
-  }
+  memoryConfig = null;
 }
 
 /**
  * 获取有效的 LLM 调用配置
  *
- * 优先级：LocalStorage 配置 > 环境变量兜底
+ * 仅返回当前页面内存中的配置
  * 返回 { apiKey, baseUrl, model }
  */
 export function getEffectiveConfig(): {
@@ -204,25 +198,11 @@ export function getEffectiveConfig(): {
   baseUrl: string;
   model: string;
 } {
-  // 先查 LocalStorage
   const saved = getSavedConfig();
-  if (saved?.apiKey && !saved.apiKey.startsWith("your-")) {
-    return {
-      apiKey: saved.apiKey,
-      baseUrl: saved.baseUrl,
-      model: saved.model,
-    };
-  }
-
-  // 兜底：环境变量
   return {
-    apiKey: process.env.NEXT_PUBLIC_LLM_API_KEY || process.env.LLM_API_KEY || "",
-    baseUrl:
-      process.env.NEXT_PUBLIC_LLM_BASE_URL ||
-      process.env.LLM_BASE_URL ||
-      "https://api.openai.com/v1",
-    model:
-      process.env.NEXT_PUBLIC_LLM_MODEL || process.env.LLM_MODEL || "gpt-4o",
+    apiKey: saved?.apiKey || "",
+    baseUrl: saved?.baseUrl || "https://api.openai.com/v1",
+    model: saved?.model || "gpt-4o",
   };
 }
 

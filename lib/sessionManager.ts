@@ -13,6 +13,7 @@ import { existsSync } from "fs";
 import { open } from "fs/promises";
 import { join } from "path";
 import { cwd } from "process";
+import { createHash, randomBytes } from "crypto";
 import type { SessionMeta, DeepRoundResult, SessionStatus, DeepEngineConfig, FileType } from "@/types";
 
 /** 会话根目录 */
@@ -30,32 +31,33 @@ export const DEFAULT_DEEP_CONFIG: DeepEngineConfig = {
 /**
  * 生成唯一会话 ID
  *
- * 格式：session_{时间戳36进制}_{4位随机字符}
+ * 格式：session_{48位加密随机十六进制}
  */
 export function createSessionId(): string {
-  const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `session_${ts}_${rand}`;
+  return `session_${randomBytes(24).toString("hex")}`;
 }
 
 /** 获取会话目录路径 */
 export function getSessionDir(sessionId: string): string {
+  if (!/^session_[a-f0-9]{48}$/.test(sessionId)) {
+    throw new Error("无效的会话标识");
+  }
   return join(SESSIONS_DIR, sessionId);
 }
 
 /** 获取 meta.json 路径 */
 function getMetaPath(sessionId: string): string {
-  return join(SESSIONS_DIR, sessionId, "meta.json");
+  return join(getSessionDir(sessionId), "meta.json");
 }
 
 /** 获取 progress.jsonl 路径 */
 function getProgressPath(sessionId: string): string {
-  return join(SESSIONS_DIR, sessionId, "progress.jsonl");
+  return join(getSessionDir(sessionId), "progress.jsonl");
 }
 
 /** 获取临时文件路径（用于原子写） */
 function getTempPath(sessionId: string, name: string): string {
-  return join(SESSIONS_DIR, sessionId, `.${name}.tmp`);
+  return join(getSessionDir(sessionId), `.${name}.tmp`);
 }
 
 // ===================== 创建与初始化 =====================
@@ -70,8 +72,9 @@ function getTempPath(sessionId: string, name: string): string {
  * @returns 新会话的 meta 信息
  */
 export async function createSession(
-  sourceFile: { filePath: string; fileName: string; fileType: FileType },
-  config?: Partial<DeepEngineConfig>
+  sourceFile: { uploadId: string; fileName: string; fileType: FileType },
+  config: Partial<DeepEngineConfig> | undefined,
+  ownerToken: string
 ): Promise<SessionMeta> {
   const sessionId = createSessionId();
   const dir = getSessionDir(sessionId);
@@ -84,6 +87,7 @@ export async function createSession(
     createdAt: Date.now(),
     updatedAt: Date.now(),
     sourceFile,
+    ownerHash: createHash("sha256").update(ownerToken).digest("hex"),
     config: { ...DEFAULT_DEEP_CONFIG, ...config },
     stats: {
       totalRounds: 0,
@@ -216,7 +220,7 @@ export async function loadProgress(
  *
  * 扫描 sessions 目录，返回所有状态不为 "completed" 的会话 meta。
  */
-export async function getPendingSessions(): Promise<SessionMeta[]> {
+export async function getPendingSessions(ownerToken?: string): Promise<SessionMeta[]> {
   try {
     const entries = await readdir(SESSIONS_DIR, { withFileTypes: true });
     const results: SessionMeta[] = [];
@@ -227,7 +231,7 @@ export async function getPendingSessions(): Promise<SessionMeta[]> {
       try {
         const raw = await readFile(metaPath, "utf-8");
         const meta = JSON.parse(raw) as SessionMeta;
-        if (meta.status !== "completed") {
+        if (meta.status !== "completed" && (!ownerToken || sessionBelongsTo(meta, ownerToken))) {
           results.push(meta);
         }
       } catch {
@@ -278,6 +282,11 @@ export async function cleanupOldSessions(maxAgeMs: number = 24 * 60 * 60 * 1000)
   } catch {
     return 0;
   }
+}
+
+export function sessionBelongsTo(meta: SessionMeta, ownerToken: string): boolean {
+  const expected = createHash("sha256").update(ownerToken).digest("hex");
+  return meta.ownerHash === expected;
 }
 
 // ===================== 私有工具 =====================

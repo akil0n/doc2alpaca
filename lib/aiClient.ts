@@ -7,6 +7,8 @@
 // ============================================================
 
 import type { LLMRequest, LLMResponse } from "@/types";
+import { localLLMEndpointsAllowed, validateLLMBaseUrl } from "@/lib/llmEndpointPolicy";
+import { reconcileLlmTokens, releaseLlmReservation, reserveLlmCall } from "@/lib/llmQuota";
 
 /** 调用 LLM 时的默认超时时间（毫秒） */
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -24,6 +26,8 @@ export interface LLMCallConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  /** Server-only authenticated owner used for quota accounting. */
+  userId?: string;
 }
 
 /**
@@ -39,27 +43,24 @@ export interface LLMCallConfig {
  */
 export async function callLLM(
   request: LLMRequest,
-  config?: LLMCallConfig
+  config?: LLMCallConfig,
+  signal?: AbortSignal
 ): Promise<LLMResponse> {
   // 获取配置：参数优先 > 环境变量
-  const apiKey =
-    config?.apiKey ||
-    process.env.LLM_API_KEY ||
-    process.env.NEXT_PUBLIC_LLM_API_KEY ||
-    "";
+  const apiKey = config?.apiKey || process.env.LLM_API_KEY || "";
 
-  const baseUrl = (
+  const requestedBaseUrl =
     config?.baseUrl ||
     process.env.LLM_BASE_URL ||
-    process.env.NEXT_PUBLIC_LLM_BASE_URL ||
-    "https://api.openai.com/v1"
-  ).replace(/\/$/, "");
+    "https://api.openai.com/v1";
+  const baseUrl = await validateLLMBaseUrl(requestedBaseUrl, {
+    allowLocal: localLLMEndpointsAllowed(),
+  });
 
   const model =
     config?.model ||
     request.model ||
     process.env.LLM_MODEL ||
-    process.env.NEXT_PUBLIC_LLM_MODEL ||
     "gpt-4o";
 
   // 校验 API Key
@@ -83,29 +84,47 @@ export async function callLLM(
   }
 
   let lastError: Error | null = null;
+  const tokenBudget =
+    Buffer.byteLength(JSON.stringify(request.messages), "utf8") +
+    (request.maxTokens ?? DEFAULT_MAX_TOKENS);
 
   // 带重试的调用循环
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (config?.userId && !(await reserveLlmCall(config.userId, tokenBudget))) {
+      throw new Error("已达到今日 LLM 调用额度");
+    }
+    let quotaSettled = false;
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      const abortFromCaller = () => controller.abort(signal?.reason);
+      if (signal?.aborted) abortFromCaller();
+      else signal?.addEventListener("abort", abortFromCaller, { once: true });
 
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          redirect: "error",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", abortFromCaller);
+      }
 
       // 处理 HTTP 错误
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
-        throw new Error(mapHttpError(response.status, errorText));
+        const safeErrorText = apiKey
+          ? errorText.replaceAll(apiKey, "[REDACTED]")
+          : errorText;
+        throw new Error(mapHttpError(response.status, safeErrorText));
       }
 
       const data = await response.json();
@@ -120,6 +139,15 @@ export async function callLLM(
         : finishReasonRaw === "length" ? "length"
         : null;
 
+      if (config?.userId) {
+        await reconcileLlmTokens(
+          config.userId,
+          tokenBudget,
+          data.usage?.total_tokens || 0
+        ).catch(() => {});
+        quotaSettled = true;
+      }
+
       return {
         rawContent: data.choices[0].message.content,
         model: data.model || model,
@@ -131,7 +159,13 @@ export async function callLLM(
         finishReason,
       };
     } catch (err) {
+      if (config?.userId && !quotaSettled) {
+        await releaseLlmReservation(config.userId, tokenBudget).catch(() => {});
+      }
       lastError = err instanceof Error ? err : new Error(String(err));
+      if (signal?.aborted) {
+        throw new Error("LLM 调用已取消");
+      }
 
       // 部分 OpenAI 兼容供应商不支持 response_format；自动降级后重试。
       if (body.response_format && /response_format|json.?mode|unsupported/i.test(lastError.message)) {

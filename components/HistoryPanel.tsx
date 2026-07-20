@@ -37,7 +37,7 @@ export function HistoryPanel({ isOpen, onClose, onLoad }: HistoryPanelProps) {
   // 打开时刷新
   useEffect(() => {
     if (isOpen) {
-      setRecords(getHistory());
+      getHistory().then(setRecords).catch(() => setRecords([]));
       setMounted(false);
       requestAnimationFrame(() => setMounted(true));
     }
@@ -55,13 +55,13 @@ export function HistoryPanel({ isOpen, onClose, onLoad }: HistoryPanelProps) {
 
   if (!isOpen) return null;
 
-  const handleDelete = (id: string) => {
-    deleteHistory(id);
-    setRecords(getHistory());
+  const handleDelete = async (id: string) => {
+    await deleteHistory(id);
+    setRecords(await getHistory());
   };
 
-  const handleClearAll = () => {
-    clearHistory();
+  const handleClearAll = async () => {
+    await clearHistory();
     setRecords([]);
   };
 

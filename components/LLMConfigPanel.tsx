@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  VENDORS,
-  saveConfig,
-  type LLMUserConfig,
-} from "@/lib/llmConfigService";
+import { VENDORS } from "@/lib/llmConfigService";
 
 interface LLMConfigPanelProps {
   isOpen: boolean;
@@ -33,7 +29,8 @@ export function LLMConfigPanel({
   model,
   onSave,
 }: LLMConfigPanelProps) {
-  const [localApiKey, setLocalApiKey] = useState(apiKey);
+  const [localApiKey, setLocalApiKey] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
   const [localModel, setLocalModel] = useState(model);
   const [vendorId, setVendorId] = useState(detectVendor(baseUrl));
@@ -42,7 +39,7 @@ export function LLMConfigPanel({
 
   // 外部 prop 变化时同步
   useEffect(() => {
-    setLocalApiKey(apiKey);
+    setLocalApiKey("");
     setLocalBaseUrl(baseUrl);
     setLocalModel(model);
     setVendorId(detectVendor(baseUrl));
@@ -65,17 +62,25 @@ export function LLMConfigPanel({
     if (v && v.models.length > 0) setLocalModel(v.models[0]);
   };
 
-  const handleSave = () => {
-    const userConfig: LLMUserConfig = {
-      vendorId,
-      model: localModel,
-      apiKey: localApiKey,
-      baseUrl: localBaseUrl,
-    };
-    // 持久化到 localStorage
-    saveConfig(userConfig);
-    // 同步给父组件
-    onSave({ apiKey: localApiKey, baseUrl: localBaseUrl, model: localModel });
+  const handleSave = async () => {
+    setSaveError("");
+    const response = await fetch("/api/me/llm-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        vendorId,
+        apiKey: localApiKey || undefined,
+        baseUrl: localBaseUrl,
+        model: localModel,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setSaveError(data.error || "保存失败");
+      return;
+    }
+    setLocalApiKey("");
+    onSave({ apiKey: "stored", baseUrl: data.baseUrl, model: data.model });
     setSaved(true);
     setTimeout(() => onClose(), 700);
   };
@@ -217,7 +222,7 @@ export function LLMConfigPanel({
               className="text-[12px] leading-relaxed"
               style={{ color: "var(--text-secondary)" }}
             >
-              配置将保存在本机浏览器，下次访问自动加载，无需重复填写。
+              API Key 使用服务端 AES-256-GCM 加密保存；页面和接口永不返回完整密钥。
             </p>
           </div>
 
@@ -242,7 +247,6 @@ export function LLMConfigPanel({
                     {v.name}
                   </option>
                 ))}
-                <option value="custom">自定义</option>
               </select>
             </div>
 
@@ -291,8 +295,8 @@ export function LLMConfigPanel({
               <input
                 type="text"
                 value={localBaseUrl}
-                onChange={(e) => setLocalBaseUrl(e.target.value)}
                 placeholder="https://api.openai.com/v1"
+                readOnly
                 className={inputClass}
                 style={inputStyle}
                 {...focusProps}
@@ -311,13 +315,15 @@ export function LLMConfigPanel({
                 type="password"
                 value={localApiKey}
                 onChange={(e) => setLocalApiKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder={apiKey ? "已加密保存；留空表示保持不变" : "sk-..."}
                 className={inputClass}
                 style={inputStyle}
                 {...focusProps}
               />
             </div>
           </div>
+
+          {saveError && <p className="mt-4 text-[12px]" style={{ color: "var(--error)" }}>{saveError}</p>}
 
           {/* 操作按钮 */}
           <div className="flex items-center gap-3 mt-7">

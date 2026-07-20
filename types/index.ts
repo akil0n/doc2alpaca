@@ -16,8 +16,8 @@ export interface FileMeta {
   fileType: FileType;
   /** 文件大小（字节） */
   fileSize: number;
-  /** 服务器上的临时文件路径 */
-  tempPath: string;
+  /** 不可猜测的一次性上传令牌；浏览器永远不会获得服务器文件路径 */
+  uploadId: string;
 }
 
 // -------------------- 文本提取 --------------------
@@ -243,10 +243,12 @@ export interface SessionMeta {
   updatedAt: number;
   /** 源文件信息 */
   sourceFile: {
-    filePath: string;
+    uploadId: string;
     fileName: string;
     fileType: FileType;
   };
+  /** 匿名浏览器会话所有者的不可逆摘要 */
+  ownerHash: string;
   /** 引擎配置 */
   config: DeepEngineConfig;
   /** 统计信息 */

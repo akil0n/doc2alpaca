@@ -1,6 +1,7 @@
 "use client";
 
 import { AppearanceMenu } from "@/components/AppearanceMenu";
+import { UserMenu } from "@/components/UserMenu";
 import { useState, useEffect } from "react";
 
 interface PageHeaderProps {
@@ -8,6 +9,8 @@ interface PageHeaderProps {
   onOpenHistory?: () => void;
   configReady?: boolean;
   historyCount?: number;
+  userName?: string;
+  userImage?: string | null;
 }
 
 export function PageHeader({
@@ -15,6 +18,8 @@ export function PageHeader({
   onOpenHistory,
   configReady,
   historyCount = 0,
+  userName,
+  userImage,
 }: PageHeaderProps) {
 
   const [scrolled, setScrolled] = useState(false);
@@ -143,8 +148,10 @@ export function PageHeader({
 
           <AppearanceMenu />
 
+          {userName && <UserMenu name={userName} image={userImage} />}
+
           <a
-            href="https://github.com"
+            href="https://github.com/akil0n/doc2alpaca"
             target="_blank"
             rel="noopener noreferrer"
             className="btn-ghost px-3.5 py-1.5 text-[13px] font-medium flex items-center gap-1.5 transition-all duration-300 ease-apple"

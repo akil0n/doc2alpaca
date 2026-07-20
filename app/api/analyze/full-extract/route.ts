@@ -1,191 +1,123 @@
-// ============================================================
-// POST /api/analyze/full-extract — 全覆盖提取（SSE 流式）
-//
-// 将文档分块，每块独立调用 LLM 穷尽提取，最终全局去重。
-// 支持续传：传入已有 sessionId 则跳过已完成的块。
-// ============================================================
-
 import { NextRequest } from "next/server";
-import { readFile, unlink } from "fs/promises";
-import { createHash } from "crypto";
-import { extractTextFromFile } from "@/lib/textExtractor";
+import { currentUserId } from "@/lib/authGuard";
+import { consumeUserRateLimit } from "@/lib/rateLimit";
 import { runFullExtraction } from "@/lib/datasetGeneration";
-import { getConfig } from "@/lib/configService";
-import {
-  loadExtractionCheckpoint,
-  isCheckpointCompatible,
-  removeExtractionCheckpoint,
-  saveExtractionCheckpoint,
-} from "@/lib/extractionCheckpoint";
-import type { FileType } from "@/types";
-import type { LLMCallConfig } from "@/lib/aiClient";
+import { purgeExtractionCheckpoints } from "@/lib/extractionCheckpoint";
+import { isSameOriginRequest } from "@/lib/requestSecurity";
+import { extractTextFromFile } from "@/lib/textExtractor";
+import { claimUpload } from "@/lib/uploadStore";
+import { resolveLlmConfig, saveGeneratedHistory } from "@/lib/userDataStore";
 
 export const runtime = "nodejs";
 
-/**
- * POST /api/analyze/full-extract
- *
- * Body:
- *   filePath    — 上传的临时文件路径
- *   fileType    — 文件类型（pdf/docx/txt/md/html）
- *   fileName    — 源文件名
- *   maxCharsPerChunk — 每块最大字符数（可选，默认 6000）
- *   llmConfig   — LLM 调用配置（可选）
- */
+
 export async function POST(request: NextRequest) {
+  if (!isSameOriginRequest(request)) {
+    return new Response("拒绝跨站请求。", { status: 403 });
+  }
+
   const encoder = new TextEncoder();
   let isDone = false;
-
-  const send = (controller: ReadableStreamDefaultController, event: string, data: unknown) => {
-    if (isDone) return;
-    try {
-      controller.enqueue(
-        encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-      );
-    } catch {
-      // 流已关闭
-    }
-  };
+  let claimed: Awaited<ReturnType<typeof claimUpload>> | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
+      const send = (event: string, data: unknown) => {
+        if (isDone) return;
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          );
+        } catch {
+          isDone = true;
+        }
+      };
+      const close = () => {
+        if (isDone) return;
+        try {
+          controller.close();
+        } catch {
+          // The browser may already have disconnected.
+        }
+        isDone = true;
+      };
+
       try {
         const body = await request.json();
-        const {
-          filePath,
-          fileType,
-          fileName,
-          maxCharsPerChunk,
-          llmConfig,
-          sessionId,
-        } = body as {
-          filePath: string;
-          fileType: FileType;
-          fileName: string;
+        const { uploadId, maxCharsPerChunk, sessionId } = body as {
+          uploadId?: string;
           maxCharsPerChunk?: number;
-          llmConfig?: LLMCallConfig;
           sessionId?: string;
         };
-
-        // ---- 参数校验 ----
-        if (!filePath || !fileType || !fileName) {
-          send(controller, "error", { message: "缺少必要参数" });
-          controller.close();
-          isDone = true;
+        const userId = await currentUserId();
+        if (!uploadId || !userId) {
+          send("error", { message: "上传令牌无效或已过期" });
+          close();
           return;
         }
 
-        // ---- 配置检查 ----
-        const hasClientConfig =
-          llmConfig?.apiKey &&
-          !llmConfig.apiKey.startsWith("your-") &&
-          !llmConfig.apiKey.startsWith("sk-your");
-        const hasEnvConfig = getConfig().hasApiKey;
-
-        if (!hasClientConfig && !hasEnvConfig) {
-          send(controller, "error", { message: "LLM API Key 未配置" });
-          controller.close();
-          isDone = true;
+        await purgeExtractionCheckpoints();
+        claimed = await claimUpload(uploadId, userId);
+        if (!(await consumeUserRateLimit(userId, "analysis", 20))) {
+          send("error", { message: "分析请求过于频繁，请稍后再试" });
+          close();
           return;
         }
 
-        // ---- 读取文件 ----
-        let buffer: Buffer;
-        try {
-          buffer = await readFile(filePath);
-        } catch {
-          send(controller, "error", { message: "无法读取文件" });
-          controller.close();
-          isDone = true;
+        const llmConfig = await resolveLlmConfig(userId);
+        if (!llmConfig) {
+          send("error", { message: "LLM API Key 未配置" });
+          close();
           return;
         }
 
-        // ---- 提取文本 ----
         let extracted;
         try {
-          extracted = await extractTextFromFile(buffer, fileType, fileName);
+          extracted = await extractTextFromFile(
+            claimed.buffer,
+            claimed.fileType,
+            claimed.fileName
+          );
         } catch {
-          send(controller, "error", { message: "文本提取失败" });
-          controller.close();
-          isDone = true;
+          send("error", { message: "文本提取失败" });
+          close();
           return;
         }
+
+        // The file is no longer needed once its contents are in memory.
+        await claimed.dispose();
+        claimed = null;
 
         if (!extracted.text || extracted.text.trim().length === 0) {
-          send(controller, "error", {
-            message: "未能提取到文本内容，文档可能为扫描件",
-          });
-          controller.close();
-        // The upload is no longer needed after extraction has produced an in-memory document.
-        unlink(filePath).catch(() => {});
-
-          isDone = true;
+          send("error", { message: "未能提取到文本内容，文档可能为扫描件" });
+          close();
           return;
         }
 
-        // ---- 发送文件信息 ----
-        const effectiveSessionId = sessionId || `extract_${Date.now().toString(36)}`;
         const resolvedMaxChars = maxCharsPerChunk ?? 6000;
-        const fingerprint = createHash("sha256")
-          .update(extracted.text)
-          .update(JSON.stringify({ fileType, maxCharsPerChunk: resolvedMaxChars, chunkOverlap: 240, schemaVersion: 1 }))
-          .digest("hex");
-        const storedCheckpoint = await loadExtractionCheckpoint(effectiveSessionId);
-        const checkpoint = isCheckpointCompatible(storedCheckpoint, fingerprint) ? storedCheckpoint : null;
-        if (storedCheckpoint && !checkpoint) await removeExtractionCheckpoint(effectiveSessionId);
-        let checkpointWrites = 0;
-
-        send(controller, "init", {
+        const requestedSessionId =
+          sessionId || `extract_${Date.now().toString(36)}`;
+        send("init", {
           fileName: extracted.sourceName,
           charCount: extracted.charCount,
           paragraphCount: extracted.paragraphCount,
-          sessionId: effectiveSessionId,
+          sessionId: requestedSessionId,
         });
 
-        // ---- 执行全覆盖提取 ----
         const result = await runFullExtraction(
           extracted,
           llmConfig,
           { maxCharsPerChunk: resolvedMaxChars },
-          // 每块完成回调
-          (chunkEvent) => {
-            send(controller, "chunk", chunkEvent);
-          },
-          // 去重完成回调
-          (dedupEvent) => {
-            send(controller, "dedup", dedupEvent);
-          },
-          checkpoint,
-          async (state) => {
-            checkpointWrites++;
-            if (checkpointWrites % 4 !== 0) return;
-            await saveExtractionCheckpoint({
-              sessionId: effectiveSessionId,
-              fingerprint,
-              schemaVersion: 1,
-              sourceName: extracted.sourceName,
-              completedChunkIds: state.completedChunkIds,
-              items: state.items,
-              updatedAt: Date.now(),
-            });
-          }
+          (chunkEvent) => send("chunk", chunkEvent),
+          (dedupEvent) => send("dedup", dedupEvent),
+          null,
+          undefined,
+          request.signal
         );
-        if (result.failures.length > 0) {
-          await saveExtractionCheckpoint({
-            sessionId: effectiveSessionId,
-            fingerprint,
-            schemaVersion: 1,
-            sourceName: extracted.sourceName,
-            completedChunkIds: result.completedChunkIds,
-            items: result.items,
-            updatedAt: Date.now(),
-          });
-        }
 
+        await saveGeneratedHistory(userId, { items: result.items });
 
-
-        // ---- 发送完成事件 ----
-        send(controller, "done", {
+        send("done", {
           totalChunks: result.totalChunks,
           totalItems: result.totalAfterDedup,
           totalBeforeDedup: result.totalBeforeDedup,
@@ -193,45 +125,41 @@ export async function POST(request: NextRequest) {
           failedChunks: result.failures.length,
           parseWarnings: result.parseErrors.length,
         });
-
-        // ---- 发送完整数据 ----
-        send(controller, "data", {
+        send("data", {
           items: result.items,
           diagnostics: {
             duplicateGroups: result.duplicateGroups,
             failures: result.failures,
           },
         });
-
-        // 全部完成后清理断点；临时上传文件已在文本提取后释放。
-        if (result.failures.length === 0) {
-          await removeExtractionCheckpoint(effectiveSessionId);
-        }
-
-        controller.close();
-        isDone = true;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "全覆盖提取过程出错";
-        try {
-          controller.enqueue(
-            encoder.encode(
-              `event: error\ndata: ${JSON.stringify({ message: msg })}\n\n`
-            )
-          );
-        } catch {
-          // 流已关闭
-        }
-        controller.close();
-        isDone = true;
+        close();
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message === "Upload not found"
+            ? "上传令牌无效、已使用或已过期"
+            : error instanceof Error
+              ? error.message
+              : "全覆盖提取过程出错";
+        send("error", { message });
+        close();
+      } finally {
+        await claimed?.dispose().catch(() => {});
+        claimed = null;
       }
+    },
+    async cancel() {
+      isDone = true;
+      await claimed?.dispose().catch(() => {});
+      claimed = null;
     },
   });
 
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-store",
       Connection: "keep-alive",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }
