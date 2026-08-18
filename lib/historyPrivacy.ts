@@ -30,9 +30,10 @@ export function historyAssociatedData(
     itemCount: number;
     isBatch: boolean;
     createdAt: Date;
-  }
+    sourceSessionId?: string | null;
+  },
 ): string {
-  return JSON.stringify({
+  const associatedData = {
     purpose: "generated-history",
     userId,
     id,
@@ -40,5 +41,12 @@ export function historyAssociatedData(
     itemCount: metadata.itemCount,
     isBatch: metadata.isBatch,
     createdAt: metadata.createdAt.toISOString(),
-  });
+  };
+  // 旧记录没有 sourceSessionId。仅在新队列记录存在该字段时加入 AAD，
+  // 保持已经加密的历史记录仍可按原格式解密。
+  return JSON.stringify(
+    metadata.sourceSessionId
+      ? { ...associatedData, sourceSessionId: metadata.sourceSessionId }
+      : associatedData,
+  );
 }

@@ -1,0 +1,30 @@
+# 依赖与构建产物（构建阶段会重新生成）
+node_modules
+.next
+out
+
+# 源码以外的重型/生成目录
+.git
+.github
+.tmp
+release
+release_build
+build
+
+# 本地环境与密钥（绝不进入镜像）
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# 杂项
+.DS_Store
+**/*.log
+*.tsbuildinfo
+next-env.d.ts
+coverage
+Doc2Alpaca
+maid-atelier-verify.png

@@ -2,13 +2,13 @@
 
 ## 上线判定
 
-当前版本可在一台具有持久磁盘的 Linux 云服务器上以 `next start` 方式运行，但不是“克隆后零配置启动”的版本。正式开放前必须完成 PostgreSQL、生产 Secret、至少一种登录方式、HTTPS 反向代理、数据库迁移和备份配置。
+当前版本可在一台具有持久磁盘的 Linux 云服务器上运行，但不是“克隆后零配置启动”的版本。正式开放前必须完成 PostgreSQL、Redis、RabbitMQ、独立 worker、生产 Secret、至少一种登录方式、HTTPS 反向代理、数据库迁移和备份配置。
 
 当前上传暂存使用本机 `.tmp`。因此，多实例、无状态容器或 Serverless 部署在接入共享对象存储和恶意文件扫描前不满足生产要求；单实例部署也必须确保应用目录不通过 Web 服务器直接暴露。
 
 ## 必需基础设施
 
-1. 创建 PostgreSQL 数据库，并设置仅服务端可见的 `DATABASE_URL`。
+1. 创建 PostgreSQL 数据库，并设置仅服务端可见的 `DATABASE_URL`；创建启用认证和持久化的 Redis、RabbitMQ，并配置 `REDIS_URL`、`RABBITMQ_URL`。不要使用公开默认密码，也不要把数据库、缓存或消息队列端口直接暴露到公网。
 2. 复制 `.env.example` 为部署平台的 Secret 配置。不要把生产 Secret 提交到 Git。
 3. 生成两个独立随机值：
 
@@ -35,7 +35,7 @@
 | QQ 互联 | `https://你的域名/api/auth/callback/qq` | `AUTH_QQ_ID`, `AUTH_QQ_SECRET` |
 | 中国大陆手机号 | 无 OAuth 回调 | `TENCENTCLOUD_*`, `TENCENT_SMS_*` |
 
-腾讯云短信模板应有两个参数：验证码和有效分钟数。验证码 5 分钟失效、最多尝试 5 次；同一手机号 60 秒内不能重复请求，并通过数据库原子计数器按手机号及来源 IP 做小时级限制。来源 IP 仅在 Vercel 或 Cloudflare Pages 注入的可信请求头上启用；其他部署会保守地共享一个来源桶。
+腾讯云短信模板应有两个参数：验证码和有效分钟数。验证码 5 分钟失效、最多尝试 5 次；同一手机号 60 秒内不能重复请求，并通过 Redis 原子计数器按手机号及来源 IP 做小时级限制。来源 IP 仅在 Vercel 或 Cloudflare Pages 注入的可信请求头上启用；其他部署会保守地共享一个来源桶。未配置短信时，只有 `NODE_ENV=development` 且显式设置 `ALLOW_DEV_OTP=true` 才会向本地页面返回开发验证码；预览、测试、staging 和生产环境不得启用该选项。
 
 ## 数据保护边界
 
@@ -52,7 +52,8 @@
 - 数据库使用 TLS、最小权限账户、加密备份和访问审计。
 - `DATA_ENCRYPTION_KEY` 不可丢失，否则已有密钥和历史无法恢复。轮换前需实现离线重加密流程，不要直接替换。
 - 每个账户默认每天最多 200 次实际 LLM 调用；每次调用前会原子预留保守 token 预算，确保当日累计预算不超过 100 万，并在响应后按实际用量回冲；上传和分析请求另有小时级限制。可按业务成本调整 `lib/llmQuota.ts`。
-- 生产环境应使用共享对象存储替代本地 `.tmp`，并配置恶意文件扫描。当前上传仍适合单实例或有持久磁盘的部署。
+- Docker Compose 本地模式通过 `jobdata` 卷让 app 与 worker 共享 `.tmp`；生产环境应使用共享对象存储和数据库任务状态替代该临时方案，并配置恶意文件扫描。不要在多主机环境中依赖本地或单机 Docker 卷。
+- RabbitMQ 发布端必须使用 publisher confirm；worker 连接断开后应退出并由进程管理器重启，从而重新注册 consumer。死信队列和 `interrupted` 会话应纳入告警。
 - 不记录请求体、完整手机号、OAuth 响应、API Key 或生成结果；监控平台也应配置字段脱敏。
 - 定期运行 `npm audit --omit=dev`，并及时升级安全补丁。
 

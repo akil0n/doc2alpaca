@@ -23,7 +23,7 @@ test("history ciphertext authenticates plaintext metadata", () => {
   };
   const encrypted = encryptJson(
     { items: [{ instruction: "q", input: "", output: "a" }] },
-    historyAssociatedData("user-1", "history-1", metadata)
+    historyAssociatedData("user-1", "history-1", metadata),
   );
   assert.throws(() =>
     decryptJson(
@@ -31,7 +31,30 @@ test("history ciphertext authenticates plaintext metadata", () => {
       historyAssociatedData("user-1", "history-1", {
         ...metadata,
         itemCount: 999,
-      })
-    )
+      }),
+    ),
+  );
+});
+
+test("queued history authenticates its source session id", () => {
+  const metadata = {
+    fileType: "json",
+    itemCount: 1,
+    isBatch: false,
+    createdAt: new Date("2026-08-17T00:00:00.000Z"),
+    sourceSessionId: `session_${"a".repeat(48)}`,
+  };
+  const encrypted = encryptJson(
+    { items: [{ instruction: "q", input: "", output: "a" }] },
+    historyAssociatedData("user-1", "history-1", metadata),
+  );
+  assert.throws(() =>
+    decryptJson(
+      encrypted,
+      historyAssociatedData("user-1", "history-1", {
+        ...metadata,
+        sourceSessionId: `session_${"b".repeat(48)}`,
+      }),
+    ),
   );
 });

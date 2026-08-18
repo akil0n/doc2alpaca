@@ -8,21 +8,21 @@ datasource db {
 }
 
 model User {
-  id            String          @id @default(cuid())
-  name          String?
-  email         String?         @unique
-  emailVerified DateTime?
-  image         String?
-  phoneHash     String?         @unique
-  phoneCipher   String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  accounts      Account[]
+  id             String             @id @default(cuid())
+  name           String?
+  email          String?            @unique
+  emailVerified  DateTime?
+  image          String?
+  phoneHash      String?            @unique
+  phoneCipher    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  accounts       Account[]
   authenticators Authenticator[]
-  llmConfig     UserLlmConfig?
-  histories     GeneratedHistory[]
-  rateLimits    UserRateLimit[]
-  dailyLlmUsage DailyLlmUsage[]
+  llmConfig      UserLlmConfig?
+  histories      GeneratedHistory[]
+  rateLimits     UserRateLimit[]
+  dailyLlmUsage  DailyLlmUsage[]
 }
 
 model Account {
@@ -37,7 +37,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([provider, providerAccountId])
   @@index([userId])
@@ -60,54 +60,38 @@ model Authenticator {
   credentialDeviceType String
   credentialBackedUp   Boolean
   transports           String?
-  user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, credentialID])
 }
 
-model PhoneChallenge {
-  id             String    @id @default(cuid())
-  phoneHash      String
-  phoneCipher    String
-  codeHash       String
-  requestIpHash  String
-  expiresAt      DateTime
-  usedAt         DateTime?
-  attempts       Int       @default(0)
-  createdAt      DateTime  @default(now())
-
-  @@index([phoneHash, createdAt])
-  @@index([requestIpHash, createdAt])
-  @@index([expiresAt])
-}
-
 model UserLlmConfig {
-  userId      String   @id
-  ciphertext  String
-  iv          String
-  authTag     String
-  keyVersion  Int      @default(1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String   @id
+  ciphertext String
+  iv         String
+  authTag    String
+  keyVersion Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model GeneratedHistory {
-  id          String   @id @default(cuid())
-  userId      String
-  ciphertext  String
-  iv          String
-  authTag     String
-  keyVersion  Int      @default(1)
-  fileType    String
-  itemCount   Int
-  isBatch     Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String   @id @default(cuid())
+  userId          String
+  sourceSessionId String?  @unique
+  ciphertext      String
+  iv              String
+  authTag         String
+  keyVersion      Int      @default(1)
+  fileType        String
+  itemCount       Int
+  isBatch         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
 }
-
 
 model UserRateLimit {
   id        String   @id
@@ -121,15 +105,6 @@ model UserRateLimit {
   @@index([userId, action])
 }
 
-
-model OtpRateLimit {
-  id        String   @id
-  count     Int      @default(0)
-  expiresAt DateTime
-
-  @@index([expiresAt])
-}
-
 model DailyLlmUsage {
   id          String   @id
   userId      String
@@ -139,10 +114,4 @@ model DailyLlmUsage {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, day])
-}
-
-
-model OtpCooldown {
-  id            String   @id
-  nextAllowedAt DateTime
 }

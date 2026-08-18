@@ -16,11 +16,13 @@ npm install
 
 ### 2. 配置数据库、登录和加密密钥
 
-复制 `.env.example` 并配置 PostgreSQL、`AUTH_SECRET`、`DATA_ENCRYPTION_KEY` 以及所需登录服务商，然后执行：
+复制 `.env.example` 并配置 PostgreSQL、Redis、RabbitMQ、`AUTH_SECRET`、`DATA_ENCRYPTION_KEY` 以及所需登录服务商，然后执行：
 
 ```bash
 npx prisma migrate deploy
 ```
+
+深度提取使用独立 RabbitMQ worker；分别运行 `npm run dev` 与 `npm run worker`，或使用 `docker compose up --build` 启动完整本地环境。Docker Compose 会要求显式提供数据库、RabbitMQ、认证和加密密码，避免使用仓库内公开默认值。
 
 登录支持手机号、微信开放平台网站应用、QQ 互联和 GitHub；未配置凭据的方式会自动隐藏。完整配置与回调地址见 [登录与安全部署](docs/DEPLOYMENT_SECURITY.md)。
 

@@ -1,11 +1,15 @@
 import type { HistoryRecord } from "@/types";
+import type { GeneratedHistory as GeneratedHistoryRow } from "@prisma/client";
 import type { LLMCallConfig } from "@/lib/aiClient";
 import { getConfig } from "@/lib/configService";
 import {
   canonicalizeGeneratedItems,
   historyAssociatedData,
 } from "@/lib/historyPrivacy";
-import { localLLMEndpointsAllowed, validateLLMBaseUrl } from "@/lib/llmEndpointPolicy";
+import {
+  localLLMEndpointsAllowed,
+  validateLLMBaseUrl,
+} from "@/lib/llmEndpointPolicy";
 import { prisma } from "@/lib/prisma";
 import { decryptJson, encryptJson } from "@/lib/serverCrypto";
 
@@ -54,26 +58,31 @@ export async function getLlmConfigMetadata(userId: string) {
 
 export async function saveLlmConfig(
   userId: string,
-  input: { vendorId: string; apiKey?: string; baseUrl: string; model: string }
+  input: { vendorId: string; apiKey?: string; baseUrl: string; model: string },
 ) {
-  if (!/^[a-z0-9_-]{1,32}$/i.test(input.vendorId)) throw new Error("INVALID_VENDOR");
-  if (!input.model.trim() || input.model.length > 200) throw new Error("INVALID_MODEL");
+  if (!/^[a-z0-9_-]{1,32}$/i.test(input.vendorId))
+    throw new Error("INVALID_VENDOR");
+  if (!input.model.trim() || input.model.length > 200)
+    throw new Error("INVALID_MODEL");
   const baseUrl = await validateLLMBaseUrl(input.baseUrl, {
     allowLocal: localLLMEndpointsAllowed(),
   });
   let apiKey = input.apiKey?.trim() || "";
   if (!apiKey) {
-    const previous = await prisma.userLlmConfig.findUnique({ where: { userId } });
+    const previous = await prisma.userLlmConfig.findUnique({
+      where: { userId },
+    });
     if (!previous) throw new Error("API_KEY_REQUIRED");
     apiKey = decryptJson<StoredLlmConfig>(
       previous,
-      `user:${userId}:llm-config`
+      `user:${userId}:llm-config`,
     ).apiKey;
   }
-  if (apiKey.length < 6 || apiKey.length > 4096) throw new Error("INVALID_API_KEY");
+  if (apiKey.length < 6 || apiKey.length > 4096)
+    throw new Error("INVALID_API_KEY");
   const encrypted = encryptJson(
     { vendorId: input.vendorId, apiKey, baseUrl, model: input.model.trim() },
-    `user:${userId}:llm-config`
+    `user:${userId}:llm-config`,
   );
   await prisma.userLlmConfig.upsert({
     where: { userId },
@@ -87,11 +96,21 @@ export async function deleteLlmConfig(userId: string): Promise<void> {
   await prisma.userLlmConfig.delete({ where: { userId } }).catch(() => {});
 }
 
-export async function resolveLlmConfig(userId: string): Promise<LLMCallConfig | undefined> {
+export async function resolveLlmConfig(
+  userId: string,
+): Promise<LLMCallConfig | undefined> {
   const row = await prisma.userLlmConfig.findUnique({ where: { userId } });
   if (row) {
-    const config = decryptJson<StoredLlmConfig>(row, `user:${userId}:llm-config`);
-    return { apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, userId };
+    const config = decryptJson<StoredLlmConfig>(
+      row,
+      `user:${userId}:llm-config`,
+    );
+    return {
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      userId,
+    };
   }
   const global = getConfig();
   if (!global.hasApiKey) return undefined;
@@ -105,7 +124,12 @@ export async function resolveLlmConfig(userId: string): Promise<LLMCallConfig | 
 
 export async function saveGeneratedHistory(
   userId: string,
-  input: { items: unknown; templateId?: string; isBatch?: boolean }
+  input: {
+    items: unknown;
+    templateId?: string;
+    isBatch?: boolean;
+    sourceSessionId?: string;
+  },
 ): Promise<HistoryRecord> {
   const items = canonicalizeGeneratedItems(input.items);
   const templateId =
@@ -113,6 +137,13 @@ export async function saveGeneratedHistory(
       ? input.templateId
       : "default";
   const isBatch = input.isBatch === true;
+  const sourceSessionId = input.sourceSessionId;
+  if (
+    sourceSessionId !== undefined &&
+    !/^session_[a-f0-9]{48}$/.test(sourceSessionId)
+  ) {
+    throw new Error("INVALID_SESSION_ID");
+  }
   const payload: HistoryPayload = { templateId, items };
   if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_HISTORY_BYTES) {
     throw new Error("HISTORY_TOO_LARGE");
@@ -120,16 +151,33 @@ export async function saveGeneratedHistory(
 
   const id = crypto.randomUUID();
   const createdAt = new Date();
-  const metadata = { fileType: "json", itemCount: items.length, isBatch, createdAt };
+  const metadata = {
+    fileType: "json",
+    itemCount: items.length,
+    isBatch,
+    createdAt,
+    sourceSessionId,
+  };
   const encrypted = encryptJson(
     payload,
-    historyAssociatedData(userId, id, metadata)
+    historyAssociatedData(userId, id, metadata),
   );
+  let storedRow: GeneratedHistoryRow | null = null;
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`history:${userId}`}))`;
-    await tx.generatedHistory.create({
-      data: { id, userId, ...encryptedColumns(encrypted), ...metadata },
-    });
+    if (sourceSessionId) {
+      storedRow = await tx.generatedHistory.findUnique({
+        where: { sourceSessionId },
+      });
+      if (storedRow && storedRow.userId !== userId) {
+        throw new Error("SESSION_HISTORY_OWNER_MISMATCH");
+      }
+    }
+    if (!storedRow) {
+      storedRow = await tx.generatedHistory.create({
+        data: { id, userId, ...encryptedColumns(encrypted), ...metadata },
+      });
+    }
     const overflow = await tx.generatedHistory.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
@@ -142,43 +190,45 @@ export async function saveGeneratedHistory(
       });
     }
   });
+  if (!storedRow) throw new Error("HISTORY_WRITE_FAILED");
+  return historyRowToRecord(userId, storedRow);
+}
+
+function historyRowToRecord(
+  userId: string,
+  row: GeneratedHistoryRow,
+): HistoryRecord {
+  const payload = decryptJson<HistoryPayload>(
+    row,
+    historyAssociatedData(userId, row.id, row),
+  );
   return {
-    id,
+    id: row.id,
     fileName: "生成结果",
-    fileType: metadata.fileType,
-    createdAt: createdAt.getTime(),
-    itemCount: items.length,
-    templateId,
-    items,
-    isBatch,
+    createdAt: row.createdAt.getTime(),
+    itemCount: row.itemCount,
+    fileType: row.fileType,
+    isBatch: row.isBatch,
+    templateId: payload.templateId,
+    items: payload.items,
   };
 }
 
-export async function listGeneratedHistory(userId: string): Promise<HistoryRecord[]> {
+export async function listGeneratedHistory(
+  userId: string,
+): Promise<HistoryRecord[]> {
   const rows = await prisma.generatedHistory.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
     take: MAX_HISTORY_RECORDS,
   });
-  return rows.map((row) => {
-    const payload = decryptJson<HistoryPayload>(
-      row,
-      historyAssociatedData(userId, row.id, row)
-    );
-    return {
-      id: row.id,
-      fileName: "生成结果",
-      createdAt: row.createdAt.getTime(),
-      itemCount: row.itemCount,
-      fileType: row.fileType,
-      isBatch: row.isBatch,
-      templateId: payload.templateId,
-      items: payload.items,
-    };
-  });
+  return rows.map((row) => historyRowToRecord(userId, row));
 }
 
-export async function deleteGeneratedHistory(userId: string, id?: string): Promise<number> {
+export async function deleteGeneratedHistory(
+  userId: string,
+  id?: string,
+): Promise<number> {
   const result = await prisma.generatedHistory.deleteMany({
     where: id ? { id, userId } : { userId },
   });

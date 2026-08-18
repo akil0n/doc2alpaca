@@ -71,9 +71,35 @@ function uploadDir(uploadId: string, rootDir: string): string {
   return join(rootDir, uploadId);
 }
 
+async function loadOwnedMetadata(
+  dir: string,
+  ownerToken: string,
+): Promise<UploadMetadata> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(join(dir, "meta.json"), "utf8"),
+    ) as Partial<UploadMetadata> | null;
+    if (
+      !parsed ||
+      typeof parsed.fileName !== "string" ||
+      typeof parsed.fileType !== "string" ||
+      typeof parsed.fileSize !== "number" ||
+      typeof parsed.ownerHash !== "string" ||
+      typeof parsed.createdAt !== "number" ||
+      !sameOwner(parsed.ownerHash, ownerHash(ownerToken))
+    ) {
+      throw new Error("invalid upload metadata");
+    }
+    return parsed as UploadMetadata;
+  } catch {
+    // 不区分资源不存在、元数据损坏和所有者不匹配，避免泄漏上传是否存在。
+    throw new Error("Upload not found");
+  }
+}
+
 export async function storeUpload(
   input: StoreUploadInput,
-  options: UploadStoreOptions = {}
+  options: UploadStoreOptions = {},
 ): Promise<StoredUpload> {
   const rootDir = options.rootDir ?? DEFAULT_ROOT_DIR;
   const uploadId = randomBytes(32).toString("hex");
@@ -102,32 +128,49 @@ export async function storeUpload(
   };
 }
 
+/**
+ * 只读校验上传存在且属于指定用户，不消费（claim）。
+ * 用于异步队列模式：API 路由先校验，真正的消费发生在 worker 进程。
+ */
+export async function peekUpload(
+  uploadId: string,
+  ownerToken: string,
+  options: UploadStoreOptions = {},
+): Promise<StoredUpload> {
+  const rootDir = options.rootDir ?? DEFAULT_ROOT_DIR;
+  const dir = uploadDir(uploadId, rootDir);
+
+  const metadata = await loadOwnedMetadata(dir, ownerToken);
+
+  return {
+    uploadId,
+    fileName: metadata.fileName,
+    fileType: metadata.fileType,
+    fileSize: metadata.fileSize,
+  };
+}
+
 export async function claimUpload(
   uploadId: string,
   ownerToken: string,
-  options: UploadStoreOptions = {}
+  options: UploadStoreOptions & { allowReclaim?: boolean } = {},
 ): Promise<ClaimedUpload> {
   const rootDir = options.rootDir ?? DEFAULT_ROOT_DIR;
   const dir = uploadDir(uploadId, rootDir);
 
-  let metadata: UploadMetadata;
-  try {
-    metadata = JSON.parse(
-      await readFile(join(dir, "meta.json"), "utf8")
-    ) as UploadMetadata;
-  } catch {
-    throw new Error("Upload not found");
-  }
-
-  if (!sameOwner(metadata.ownerHash, ownerHash(ownerToken))) {
-    throw new Error("Upload not found");
-  }
+  const metadata = await loadOwnedMetadata(dir, ownerToken);
 
   const internalPath = join(dir, "claimed");
+  let renamedByThisCall = false;
   try {
+    // 队列模式（allowReclaim）：content 可能已被上一次尝试 claim 走，
+    // 但会话未完成前文件必须保留（重试/续跑需要）。回退到 claimed 文件。
     await rename(join(dir, "content"), internalPath);
+    renamedByThisCall = true;
   } catch {
-    throw new Error("Upload not found");
+    if (!options.allowReclaim) {
+      throw new Error("Upload not found");
+    }
   }
 
   try {
@@ -140,14 +183,18 @@ export async function claimUpload(
       internalPath,
       dispose: () => rm(dir, { recursive: true, force: true }),
     };
-  } catch (error) {
-    await rm(dir, { recursive: true, force: true });
-    throw error;
+  } catch {
+    // 只有本次调用完成了 content → claimed 的所有权转移时才清理目录。
+    // reclaim 读取失败可能是另一个 worker/janitor 的并发行为，不能误删共享目录。
+    if (renamedByThisCall) {
+      await rm(dir, { recursive: true, force: true });
+    }
+    throw new Error("Upload not found");
   }
 }
 
 export async function cleanupExpiredUploads(
-  options: UploadStoreOptions & { maxAgeMs?: number } = {}
+  options: UploadStoreOptions & { maxAgeMs?: number } = {},
 ): Promise<number> {
   const rootDir = options.rootDir ?? DEFAULT_ROOT_DIR;
   const maxAgeMs = options.maxAgeMs ?? 30 * 60 * 1000;
@@ -166,7 +213,7 @@ export async function cleanupExpiredUploads(
     const dir = uploadDir(entry.name, rootDir);
     try {
       const metadata = JSON.parse(
-        await readFile(join(dir, "meta.json"), "utf8")
+        await readFile(join(dir, "meta.json"), "utf8"),
       ) as UploadMetadata;
       if (now - metadata.createdAt <= maxAgeMs) continue;
     } catch {
@@ -178,7 +225,6 @@ export async function cleanupExpiredUploads(
 
   return removed;
 }
-
 
 const JANITOR_INTERVAL_MS = 10 * 60 * 1000;
 let janitorTimer: ReturnType<typeof setInterval> | null = null;
