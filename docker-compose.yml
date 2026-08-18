@@ -1,0 +1,118 @@
+# ============================================================
+# Doc2Alpaca 本地编排：一条命令起 5 个服务
+#   postgres + redis + rabbitmq + app(web) + worker(深度提取消费者)
+#
+# 启动：
+#   docker compose up --build
+# 首次启动会自动执行 prisma migrate deploy（app 容器启动脚本内）
+#
+# Secret 通过环境变量显式提供；缺失时 Compose 会拒绝启动。
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-doc2alpaca}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-doc2alpaca}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-doc2alpaca}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请设置 RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"    # AMQP 协议端口
+      - "127.0.0.1:15672:15672"  # 管理后台，仅本机访问
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-doc2alpaca}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-doc2alpaca}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-doc2alpaca}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${AUTH_SECRET:?请设置 AUTH_SECRET}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?请设置 DATA_ENCRYPTION_KEY}
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    command: sh -c "npx prisma migrate deploy && node server.js"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # 上传、会话和进度目前仍使用本地文件；app 与 worker 必须看到同一个目录。
+      - jobdata:/app/.tmp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-doc2alpaca}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-doc2alpaca}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-doc2alpaca}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${AUTH_SECRET:?请设置 AUTH_SECRET}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?请设置 DATA_ENCRYPTION_KEY}
+    command: ["npx", "tsx", "workers/deepWorker.ts"]
+    depends_on:
+      app:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - jobdata:/app/.tmp
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitdata:
+  jobdata:

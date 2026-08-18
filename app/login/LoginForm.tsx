@@ -31,7 +31,13 @@ export function LoginForm({ providers }: LoginFormProps) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "验证码发送失败");
       setSent(true);
-      setMessage("验证码已发送，5 分钟内有效");
+      if (typeof data.devCode === "string") {
+        setCode(data.devCode);
+        setMessage(`开发模式验证码已自动填入：${data.devCode}`);
+      } else {
+        setCode("");
+        setMessage("验证码已发送，5 分钟内有效");
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "验证码发送失败");
     } finally {

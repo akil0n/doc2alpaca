@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { QQProvider } from "@/lib/qqProvider";
 import { verifyPhoneOtp } from "@/lib/smsService";
 import { privacyHash } from "@/lib/serverCrypto";
+import { resolveGitHubCredentials } from "@/lib/authProviderConfig";
 
 const baseAdapter = PrismaAdapter(prisma);
 function protectedAccountId(provider: string, providerAccountId: string) {
@@ -21,7 +22,10 @@ const privacyAdapter: Adapter = {
     return (
       (await baseAdapter.getUserByAccount?.({
         ...account,
-        providerAccountId: protectedAccountId(account.provider, account.providerAccountId),
+        providerAccountId: protectedAccountId(
+          account.provider,
+          account.providerAccountId,
+        ),
       })) ?? null
     );
   },
@@ -29,14 +33,17 @@ const privacyAdapter: Adapter = {
     return (
       (await baseAdapter.getAccount?.(
         protectedAccountId(provider, providerAccountId),
-        provider
+        provider,
       )) ?? null
     );
   },
   async unlinkAccount(account) {
     await baseAdapter.unlinkAccount?.({
       ...account,
-      providerAccountId: protectedAccountId(account.provider, account.providerAccountId),
+      providerAccountId: protectedAccountId(
+        account.provider,
+        account.providerAccountId,
+      ),
     });
   },
   async linkAccount(account: AdapterAccount) {
@@ -44,7 +51,10 @@ const privacyAdapter: Adapter = {
       userId: account.userId,
       type: account.type,
       provider: account.provider,
-      providerAccountId: protectedAccountId(account.provider, account.providerAccountId),
+      providerAccountId: protectedAccountId(
+        account.provider,
+        account.providerAccountId,
+      ),
     };
     await baseAdapter.linkAccount?.(safeAccount);
   },
@@ -59,7 +69,8 @@ const providers: Provider[] = [
       code: { label: "验证码", type: "text" },
     },
     async authorize(credentials) {
-      const phone = typeof credentials.phone === "string" ? credentials.phone : "";
+      const phone =
+        typeof credentials.phone === "string" ? credentials.phone : "";
       const code = typeof credentials.code === "string" ? credentials.code : "";
       const user = await verifyPhoneOtp(phone, code);
       return user ? { id: user.id, name: user.name } : null;
@@ -67,15 +78,21 @@ const providers: Provider[] = [
   }),
 ];
 
-if (process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET) {
+const githubCredentials = resolveGitHubCredentials();
+if (githubCredentials) {
   providers.push(
     GitHub({
-      clientId: process.env.AUTH_GITHUB_ID,
-      clientSecret: process.env.AUTH_GITHUB_SECRET,
+      clientId: githubCredentials.clientId,
+      clientSecret: githubCredentials.clientSecret,
       profile(profile) {
-        return { id: String(profile.id), name: "GitHub 用户", email: null, image: null };
+        return {
+          id: String(profile.id),
+          name: "GitHub 用户",
+          email: null,
+          image: null,
+        };
       },
-    })
+    }),
   );
 }
 if (process.env.AUTH_WECHAT_ID && process.env.AUTH_WECHAT_SECRET) {
@@ -92,7 +109,7 @@ if (process.env.AUTH_WECHAT_ID && process.env.AUTH_WECHAT_SECRET) {
           image: null,
         };
       },
-    })
+    }),
   );
 }
 if (process.env.AUTH_QQ_ID && process.env.AUTH_QQ_SECRET) {
@@ -100,7 +117,7 @@ if (process.env.AUTH_QQ_ID && process.env.AUTH_QQ_SECRET) {
     QQProvider({
       clientId: process.env.AUTH_QQ_ID,
       clientSecret: process.env.AUTH_QQ_SECRET,
-    })
+    }),
   );
 }
 

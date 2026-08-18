@@ -10,6 +10,9 @@
     "lint": "next lint",
     "test": "tsx --test tests/*.test.ts",
     "electron:setup": "node scripts/install-electron.js",
+    "worker:dev": "tsx watch workers/deepWorker.ts",
+    "worker": "tsx workers/deepWorker.ts",
+    "mock:llm": "tsx scripts/mockLLM.ts",
     "electron:dev": "concurrently -k -n next,electron \"next dev -p 3457\" \"wait-on -t 120000 -i 3000 http://localhost:3457 && cross-env ELECTRON_DEV=1 electron .\"",
     "electron:build:win": "next build && node scripts/postbuild.js && electron-builder --win --x64",
     "electron:build:mac": "next build && node scripts/postbuild.js && electron-builder --mac",
@@ -20,6 +23,8 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/client": "^6.19.3",
+    "amqplib": "^2.0.1",
+    "dotenv": "^17.4.2",
     "mammoth": "^1.6.0",
     "marked": "^12.0.0",
     "next": "^15.5.18",
@@ -29,7 +34,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-dropzone": "^14.2.3",
-    "react-hot-toast": "^2.4.1"
+    "react-hot-toast": "^2.4.1",
+    "redis": "^6.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

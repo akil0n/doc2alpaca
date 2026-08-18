@@ -102,13 +102,11 @@ export async function runDeepAnalysis(
 
     // 条件 1: LLM 没有返回任何新数据 → 内容已榨干
     if (newItems.length === 0) {
-      await updateSession(session.sessionId, { status: "completed" });
       return { totalItems: allItems.length, totalRounds: round, items: allItems };
     }
 
     // 条件 2: LLM 自然结束（未触达 max_tokens）→ 本轮已涵盖全部内容
     if (finishReason === "stop") {
-      await updateSession(session.sessionId, { status: "completed" });
       return { totalItems: allItems.length, totalRounds: round, items: allItems };
     }
 
@@ -118,7 +116,6 @@ export async function runDeepAnalysis(
       if (prevRound.items.length > 0 && newItems.length > 0) {
         const avgSim = averageSimilarity(newItems, prevRound.items);
         if (avgSim > config.similarityThreshold) {
-          await updateSession(session.sessionId, { status: "completed" });
           return { totalItems: allItems.length, totalRounds: round, items: allItems };
         }
       }
@@ -126,7 +123,6 @@ export async function runDeepAnalysis(
   }
 
   // 达到最大轮数
-  await updateSession(session.sessionId, { status: "completed" });
   return { totalItems: allItems.length, totalRounds: config.maxRounds, items: allItems };
 }
 

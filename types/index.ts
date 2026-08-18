@@ -229,7 +229,7 @@ export interface DeepEngineConfig {
 }
 
 /** 会话状态 */
-export type SessionStatus = "running" | "completed" | "interrupted" | "aborted";
+export type SessionStatus = "queued" | "running" | "completed" | "interrupted" | "aborted";
 
 /** 会话元信息 */
 export interface SessionMeta {
